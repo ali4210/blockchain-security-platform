@@ -1,0 +1,19 @@
+{
+  "name": "blockchain-security-platform",
+  "version": "1.0.0",
+  "description": "Advanced Blockchain Security Platform — Topic 124 — Al-Nafi AIOps Level 6 — Saleem Ali",
+  "scripts": {
+    "compile":      "hardhat compile",
+    "test":         "hardhat test",
+    "node":         "hardhat node",
+    "scan":         "python3 scanners/security_scanner.py",
+    "demo":         "hardhat run demos/reentrancy_demo.js --network localhost"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "hardhat": "^2.19.0"
+  },
+  "keywords": ["blockchain", "security", "smart-contracts", "defi", "slither"],
+  "author": "Saleem Ali",
+  "license": "MIT"
+}
