@@ -87,18 +87,17 @@ jobs:
       - name: "📦 Install Node dependencies"
         run: |
           npm install
-          npm install @openzeppelin/contracts
 
       - name: "📦 Install Slither"
         run: |
           pip install slither-analyzer
 
-      - name: "🔍 Scan SecureBank.sol"
+      - name: "🔍 Scan SecureBank.sol and save report"
         run: |
           mkdir -p reports
           slither contracts/SecureBank.sol \
             --solc-remaps "@openzeppelin=node_modules/@openzeppelin" \
-            --json reports/SecureBank_report.json
+            --json reports/SecureBank_report.json || true
 
       - name: "🚦 Fail only if SecureBank has High issues"
         run: |
@@ -114,9 +113,14 @@ jobs:
 
               detectors = data.get("results", {}).get("detectors", [])
               for d in detectors:
-                  if d.get("impact") == "High":
+                  impact = d.get("impact")
+                  check = d.get("check")
+
+                  if impact == "High":
                       critical += 1
-                      print(f"[CRITICAL] {d.get('check')} in {report_file}")
+                      print(f"[CRITICAL] {check} in {report_file}")
+                  else:
+                      print(f"[INFO] {impact} - {check}")
 
               if critical > 0:
                   print(f"\n❌ SECURITY GATE FAILED — {critical} High issue(s) found in SecureBank!")
