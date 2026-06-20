@@ -6,68 +6,19 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: "Choose which contract to validate"
+        required: true
+        default: "secure"
+        type: choice
+        options:
+          - secure
+          - vulnerable
 
 jobs:
-  vulnerable-demo-scan:
-    name: "❌ VulnerableBank Demo Scan (Expected Findings)"
-    runs-on: ubuntu-latest
-    continue-on-error: true
-
-    steps:
-      - name: "📥 Checkout code"
-        uses: actions/checkout@v4
-
-      - name: "🐍 Setup Python 3.10"
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: "📦 Install Slither"
-        run: |
-          pip install slither-analyzer
-          echo "Slither version: $(slither --version)"
-
-      - name: "🔍 Scan VulnerableBank.sol"
-        run: |
-          mkdir -p reports
-          slither contracts/VulnerableBank.sol --json reports/VulnerableBank_report.json || true
-
-      - name: "🚨 Show expected critical findings"
-        run: |
-          python3 - <<'EOF'
-          import json, sys
-
-          report_file = "reports/VulnerableBank_report.json"
-          critical = 0
-
-          try:
-              with open(report_file) as f:
-                  data = json.load(f)
-
-              detectors = data.get("results", {}).get("detectors", [])
-              for d in detectors:
-                  if d.get("impact") == "High":
-                      critical += 1
-                      print(f"[EXPECTED HIGH] {d.get('check')} in {report_file}")
-
-              if critical > 0:
-                  print(f"\n✅ Demo successful: VulnerableBank produced {critical} High finding(s), as expected.")
-              else:
-                  print("\n⚠️ Demo note: No High findings detected in VulnerableBank.")
-          except Exception as e:
-              print(f"Could not parse {report_file}: {e}")
-              sys.exit(1)
-          EOF
-
-      - name: "📤 Upload VulnerableBank report"
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: vulnerablebank-report
-          path: reports/VulnerableBank_report.json
-
-  secure-contract-scan:
-    name: "✅ SecureBank Security Gate"
+  selected-contract-scan:
+    name: "🛡️ Selected Contract Security Scan"
     runs-on: ubuntu-latest
 
     steps:
@@ -84,27 +35,48 @@ jobs:
         with:
           node-version: "18"
 
-      - name: "📦 Install Node dependencies"
+      - name: "📦 Install dependencies"
         run: |
           npm install
-
-      - name: "📦 Install Slither"
-        run: |
           pip install slither-analyzer
 
-      - name: "🔍 Scan SecureBank.sol and save report"
+      - name: "🎯 Select contract"
+        id: target
+        run: |
+          MODE="${{ github.event.inputs.scan_mode }}"
+          if [ -z "$MODE" ]; then
+            MODE="secure"
+          fi
+
+          if [ "$MODE" = "vulnerable" ]; then
+            echo "contract_file=contracts/VulnerableBank.sol" >> $GITHUB_OUTPUT
+            echo "report_file=reports/VulnerableBank_report.json" >> $GITHUB_OUTPUT
+            echo "label=VulnerableBank" >> $GITHUB_OUTPUT
+          else
+            echo "contract_file=contracts/SecureBank.sol" >> $GITHUB_OUTPUT
+            echo "report_file=reports/SecureBank_report.json" >> $GITHUB_OUTPUT
+            echo "label=SecureBank" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🔍 Run Slither scan"
         run: |
           mkdir -p reports
-          slither contracts/SecureBank.sol \
+          slither "${{ steps.target.outputs.contract_file }}" \
             --solc-remaps "@openzeppelin=node_modules/@openzeppelin" \
-            --json reports/SecureBank_report.json || true
+            --json "${{ steps.target.outputs.report_file }}" || true
 
-      - name: "🚦 Fail only if SecureBank has High issues"
+      - name: "🚦 Apply security gate"
         run: |
           python3 - <<'EOF'
           import json, sys
 
-          report_file = "reports/SecureBank_report.json"
+          mode = "${{ github.event.inputs.scan_mode }}"
+          if not mode:
+              mode = "secure"
+
+          label = "${{ steps.target.outputs.label }}"
+          report_file = "${{ steps.target.outputs.report_file }}"
+
           critical = 0
 
           try:
@@ -118,26 +90,38 @@ jobs:
 
                   if impact == "High":
                       critical += 1
-                      print(f"[CRITICAL] {check} in {report_file}")
+                      print(f"[HIGH] {check} in {label}")
                   else:
                       print(f"[INFO] {impact} - {check}")
 
-              if critical > 0:
-                  print(f"\n❌ SECURITY GATE FAILED — {critical} High issue(s) found in SecureBank!")
-                  sys.exit(1)
-              else:
-                  print("✅ SECURITY GATE PASSED — SecureBank has no High issues.")
+              if mode == "vulnerable":
+                  if critical > 0:
+                      print(f"\n❌ EXPECTED FAILURE: {label} contains {critical} High vulnerability finding(s).")
+                      print("   This demonstrates that the CI/CD pipeline blocks insecure code.")
+                      sys.exit(1)
+                  else:
+                      print(f"\n⚠️ Unexpected result: {label} did not produce High findings.")
+                      sys.exit(1)
+
+              if mode == "secure":
+                  if critical > 0:
+                      print(f"\n❌ SECURITY GATE FAILED: {label} contains {critical} High vulnerability finding(s).")
+                      sys.exit(1)
+                  else:
+                      print(f"\n✅ SECURITY GATE PASSED: {label} has no High vulnerability findings.")
+                      sys.exit(0)
+
           except Exception as e:
               print(f"Could not parse {report_file}: {e}")
               sys.exit(1)
           EOF
 
-      - name: "📤 Upload SecureBank report"
+      - name: "📤 Upload scan report"
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: securebank-report
-          path: reports/SecureBank_report.json
+          name: selected-contract-report
+          path: reports/
 
   dependency-check:
     name: "📦 Dependency & License Check"
@@ -168,21 +152,3 @@ jobs:
           else
             echo "Skipping npm audit — no package.json"
           fi
-
-  final-green-gate:
-    name: "🎯 Final Pipeline Status"
-    runs-on: ubuntu-latest
-    needs: [vulnerable-demo-scan, secure-contract-scan, dependency-check]
-
-    steps:
-      - name: "✅ Pipeline summary"
-        run: |
-          echo "========================================"
-          echo "  DEVSECOPS PIPELINE COMPLETE"
-          echo "========================================"
-          echo "  VulnerableBank : Findings detected (expected demo result)"
-          echo "  SecureBank     : Passed security gate"
-          echo "  Dependencies   : Checked"
-          echo "========================================"
-          echo "  FINAL STATUS: GREEN ✅"
-          echo "========================================"
