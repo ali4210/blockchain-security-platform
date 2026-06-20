@@ -1,80 +1,93 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title SecureBank
- * @notice FIXED version of VulnerableBank — all 3 vulnerabilities patched
- * @dev Topic 124 Demo — Al-Nafi AIOps Level 6 — Saleem Ali
- *
- * Fixes applied:
- *  1. ReentrancyGuard (nonReentrant modifier)
- *  2. Checks-Effects-Interactions pattern
- *  3. onlyOwner access control on emergencyDrain
+ * @notice Fixed version of VulnerableBank for educational and defensive demonstration
+ * @dev Uses CEI pattern + ReentrancyGuard + proper access control
  */
-contract SecureBank {
-
+contract SecureBank is ReentrancyGuard {
     mapping(address => uint256) public balances;
     uint256 public totalDeposits;
     address public owner;
 
-    // ── Reentrancy guard ───────────────────────────────────────────────
-    bool private _locked;
-    modifier nonReentrant() {
-        require(!_locked, "ReentrancyGuard: reentrant call");
-        _locked = true;
-        _;
-        _locked = false;
-    }
-
-    // ── Access control ─────────────────────────────────────────────────
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Caller is not the owner");
-        _;
-    }
-
     event Deposit(address indexed user, uint256 amount);
     event Withdraw(address indexed user, uint256 amount);
+    event EmergencyWithdrawal(address indexed owner, uint256 amount);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
 
     constructor() {
         owner = msg.sender;
     }
 
+    // ── Deposit ────────────────────────────────────────────────────────
     function deposit() public payable {
         require(msg.value > 0, "Send ETH to deposit");
         balances[msg.sender] += msg.value;
-        totalDeposits        += msg.value;
+        totalDeposits += msg.value;
         emit Deposit(msg.sender, msg.value);
     }
 
     // ── SECURE withdraw ────────────────────────────────────────────────
-    // FIX 1: nonReentrant blocks recursive calls
-    // FIX 2: CEI — state updated BEFORE external call
+    // FIXES:
+    // 1. nonReentrant modifier prevents recursive re-entry
+    // 2. state updated BEFORE external call (CEI pattern)
+    // 3. low-level call result is checked
     function withdraw(uint256 _amount) public nonReentrant {
-        // CHECKS
+        require(_amount > 0, "Amount must be greater than zero");
         require(balances[msg.sender] >= _amount, "Insufficient balance");
 
-        // EFFECTS — update state first ✅
+        // Effects first
         balances[msg.sender] -= _amount;
-        totalDeposits        -= _amount;
+        totalDeposits -= _amount;
 
-        // INTERACTIONS — external call last ✅
-        (bool success, ) = msg.sender.call{value: _amount}("");
+        // Interaction last
+        (bool success, ) = payable(msg.sender).call{value: _amount}("");
         require(success, "Transfer failed");
 
         emit Withdraw(msg.sender, _amount);
     }
 
     // ── SECURE emergency drain ─────────────────────────────────────────
-    // FIX 3: onlyOwner modifier ✅
-    function emergencyDrain() public onlyOwner {
-        uint256 bal = address(this).balance;
-        (bool ok, ) = msg.sender.call{value: bal}("");
+    // FIX: restricted to owner only
+    function emergencyDrain() public onlyOwner nonReentrant {
+        uint256 amount = address(this).balance;
+        require(amount > 0, "No funds available");
+
+        (bool ok, ) = payable(owner).call{value: amount}("");
         require(ok, "Drain failed");
+
+        emit EmergencyWithdrawal(owner, amount);
     }
 
-    function getMyBalance()       public view returns (uint256) { return balances[msg.sender]; }
-    function getContractBalance() public view returns (uint256) { return address(this).balance; }
+    // ── Ownership management ───────────────────────────────────────────
+    function transferOwnership(address newOwner) public onlyOwner {
+        require(newOwner != address(0), "Invalid new owner");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
+    }
 
-    receive() external payable { deposit(); }
-    fallback() external payable { deposit(); }
+    // ── View helpers ───────────────────────────────────────────────────
+    function getMyBalance() public view returns (uint256) {
+        return balances[msg.sender];
+    }
+
+    function getContractBalance() public view returns (uint256) {
+        return address(this).balance;
+    }
+
+    receive() external payable {
+        deposit();
+    }
+
+    fallback() external payable {
+        revert("Invalid call");
+    }
 }
